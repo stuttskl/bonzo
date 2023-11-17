@@ -3,49 +3,52 @@ const express = require("express");
 const SpotifyWebApi = require("spotify-web-api-node");
 const app = express();
 const cors = require("cors");
+const crypto = require("crypto");
 const querystring = require("querystring");
+require("../db/config");
 
 const scopes = [
-    "ugc-image-upload",
     "user-read-playback-state",
     "user-modify-playback-state",
     "user-read-currently-playing",
-    "streaming",
-    "app-remote-control",
     "user-read-email",
-    "user-read-private",
-    "playlist-read-collaborative",
     "playlist-modify-public",
     "playlist-read-private",
     "playlist-modify-private",
     "user-library-modify",
     "user-library-read",
-    "user-top-read",
-    "user-read-playback-position",
     "user-read-recently-played",
-    "user-follow-read",
-    "user-follow-modify",
 ];
 
-var spotifyApi = new SpotifyWebApi({
-    clientId: process.env.CLIENT_ID,
-    clientSecret: process.env.CLIENT_SECRET,
-    redirectUri: "http://localhost:3001/callback",
+const clientId = process.env.CLIENT_ID;
+const clientSecret = process.env.CLIENT_SECRET;
+const redirectUri = process.env.REDIRECT_URI;
+
+const spotifyApi = new SpotifyWebApi({
+    clientId: clientId,
+    clientSecret: clientSecret,
+    redirectUri: redirectUri,
 });
 
+const generateToken = () => {
+    return crypto.randomBytes(16).toString("hex");
+};
+
+const state = generateToken();
+const stateKey = "spotify_auth_state";
 app.use(express.json());
 app.use(cors({ origin: true, credentials: true }));
 app.options("*", cors());
 
 app.get("/login", async (req, res) => {
-    res.redirect(spotifyApi.createAuthorizeURL(scopes));
+    res.redirect(spotifyApi.createAuthorizeURL(scopes, state));
 });
 
 app.get("/callback", async (req, res) => {
-    console.log("in /callback");
     const error = req.query.error;
     const code = req.query.code;
     const state = req.query.state;
+    const storedState = req.cookies ? req.cookies[stateKey] : null;
 
     if (error) {
         console.error("Callback Error:", error);
@@ -55,7 +58,7 @@ app.get("/callback", async (req, res) => {
 
     spotifyApi
         .authorizationCodeGrant(code)
-        .then((data) => {
+        .then(async (data) => {
             const access_token = data.body["access_token"];
             const refresh_token = data.body["refresh_token"];
             const expires_in = data.body["expires_in"];
@@ -79,11 +82,6 @@ app.get("/callback", async (req, res) => {
                 console.log("access_token:", access_token);
                 spotifyApi.setAccessToken(access_token);
             }, (expires_in / 2) * 1000);
-
-            return spotifyApi.getMe();
-        })
-        .then((data) => {
-            console.log("Retrieved data for " + data.body["display_name"]);
         })
         .catch((error) => {
             console.error("Error getting Tokens:", error);
